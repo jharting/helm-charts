@@ -33,34 +33,47 @@ spec:
       securityContext:
         fsGroup: {{ default 999 .Values.securityContext.fsGroup }}
         runAsUser: {{ default 999 .Values.securityContext.runAsUser }}
+        # On OSD we cannot run with UID 999 (cassandra). Therefore, we use
+        # supplementalGroups to associate the user with the given GID
+        supplementalGroups:
+        - 999
       {{- end }}
 {{- if .Values.affinity }}
       affinity:
 {{ toYaml .Values.affinity | indent 8 }}
 {{- end }}
-      initContainers:
-      - name: increase-vm-max-map-count
-        image: busybox
-        imagePullPolicy: IfNotPresent
-        command: ["sysctl", "-w", "vm.max_map_count=1048575"]
-        securityContext:
-          privileged: true
-      - name: increase-ulimit
-        image: busybox
-        command: [ "sh","-c","ulimit -l unlimited" ]
-        securityContext:
-          privileged: true
+# This is ignored for now as we cannot run privileged containers on our cluster
+#      initContainers:
+#      - name: increase-vm-max-map-count
+#        image: busybox
+#        imagePullPolicy: IfNotPresent
+#        command: ["sysctl", "-w", "vm.max_map_count=1048575"]
+#        securityContext:
+#          privileged: true
+#      - name: increase-ulimit
+#        image: busybox
+#        command: [ "sh","-c","ulimit -l unlimited" ]
+#        securityContext:
+#          privileged: true
       containers:
       - name: {{ template "elassandra.fullname" . }}
         image: "{{ .Values.image.repo }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
         terminationMessagePolicy: "FallbackToLogsOnError"
+        # On OSD this container runs with random UID and GID of 0 (root)
+        # Cassandra does not like the root GID. We need to add -R to override
+        command:
+        - docker-entrypoint.sh
+        args:
+        - cassandra
+        - -fR
         securityContext:
           privileged: false
           # applying fix in: https://github.com/kubernetes/kubernetes/issues/3595#issuecomment-287692878 
           # https://docs.docker.com/engine/reference/run/#operator-exclusive-options
-          capabilities:
-            add: ["IPC_LOCK", "SYS_RESOURCE"]
+          # Neither of these capabilities are allowed on our OSD cluster
+          #capabilities:
+            #add: ["IPC_LOCK", "SYS_RESOURCE"]
         resources:
 {{ toYaml .Values.resources | indent 10 }}
         env:
